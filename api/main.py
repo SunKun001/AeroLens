@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,9 +18,13 @@ FEATURES = ['Airline','Source','Destination','Total_Stops','Distance_km',
 
 app = FastAPI(title="AeroLens API")
 
+# Comma-separated list of allowed frontend origins, e.g.
+# ALLOWED_ORIGINS=https://aerolens.vercel.app,http://localhost:5173
+origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],   # Vite dev server
+    allow_origins=origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

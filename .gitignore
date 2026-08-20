@@ -1,6 +1,7 @@
 .env
 .venv/
 data/*.csv
+!data/cleaned_flights_analysis.csv
 __pycache__/
 *.pyc
 tempCodeRunnerFile.py
