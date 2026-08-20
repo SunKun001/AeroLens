@@ -60,3 +60,69 @@ routes, not aircraft pricing.
 Analysis reads from local CSV. A Supabase Postgres table holds all 93,083
 rows with both flag columns as a parallel storage layer, demonstrating
 database integration; it is not a dependency of the analysis pipeline.
+
+# Part 3 — Flight Price Forecasting
+
+## Method
+The Part 2 XGBoost pipeline is used to generate counterfactual price curves.
+For a given route and cabin class, up to 200 real flights are sampled; each is
+cloned 121 times with every feature held fixed except Days_Before_Departure,
+which varies from 0 to 120. All rows are predicted and averaged column-wise
+across flights.
+
+Averaging is required because XGBoost's base learners are piecewise-constant:
+a single flight's curve is a step function, non-monotonic in places. Averaging
+across flights whose split boundaries differ recovers a smooth response. A
+centred 7-day rolling mean removes residual jitter.
+
+A single-flight curve was generated first and produced an implausible 198%
+spread by comparing the minimum and maximum predicted days — both noise-
+influenced extrema. Window comparison (0-3 days vs 60-120 days) replaced it.
+
+## Booking Threshold
+Defined as the latest lead time at which predicted price remains within 5% of
+its floor (mean smoothed price at 90+ days). The 5% tolerance is a chosen
+judgement, not a derived value.
+
+| Route | Class | 60-120d | 0-3d | Premium | Book by |
+|---|---|---|---|---|---|
+| Delhi -> Mumbai | Economy | Rs.5,400 | Rs.9,756 | 80.7% | 33 days |
+| Mumbai -> Bangalore | Economy | Rs.3,524 | Rs.6,569 | 86.4% | 33 days |
+| Delhi -> Dubai | Economy | Rs.23,352 | Rs.39,712 | 70.1% | 33 days |
+| Mumbai -> London | Economy | Rs.70,997 | Rs.121,156 | 70.6% | 32 days |
+| Delhi -> Mumbai | Business | Rs.15,008 | Rs.21,285 | 41.8% | 31 days |
+| Mumbai -> London | Business | Rs.161,993 | Rs.182,939 | 12.9% | 15 days |
+
+## Findings
+1. The Economy threshold is stable at 32-33 days across routes spanning
+   850km to 7,000km. Distance does not affect when prices begin rising.
+2. Last-minute premium falls as cabin class rises: Economy 70-86%,
+   short-haul Business 41.8%, long-haul Business 12.9%. Consistent with
+   yield management — premium cabins serve inflexible travellers who book
+   late, so airlines need no steep ramp to fill them.
+3. Booking earlier than ~33 days yields under 5% additional saving.
+
+## Convergent Validation
+| Method | Threshold | Premium |
+|---|---|---|
+| Chart 3 — observed medians, all Economy | ~30 days | 45% |
+| Segment table — Economy <1000km, class/distance fixed | ~30 days | 60% |
+| Model counterfactual — four Economy routes | 32-33 days | 70-86% |
+
+Premium estimates increase with the tightness of control: pooling all Economy
+routes dilutes the effect because long-haul fares move proportionally less.
+Chart 3 involves no model at all, so agreement with the counterfactual
+constitutes independent confirmation.
+
+## Limitations
+- The model learned a statistical association between lead time and price,
+  not airlines' yield-management logic. A policy change would render the
+  forecast confidently wrong with no signal in the data.
+- The 32-33 day clustering across four dissimilar routes is tighter than
+  real-world pricing would produce, suggesting the synthetic dataset encodes
+  a fixed timing rule the model recovered. Evidence the model works; not
+  evidence about real airline pricing.
+- A minor bump at 75-85 days in the indexed curves is averaging noise within
+  the 5% band, not a real effect.
+- Model accuracy is ~15% median error across all cabin classes; forecasts
+  should be read as directional, not as fare quotes.
