@@ -9,7 +9,10 @@ import {
   ReferenceLine,
 } from 'recharts'
 
-const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+// `??` (not `||`) so an explicitly empty VITE_API_URL stays empty, producing
+// relative /api/* fetches when frontend and backend share a domain (Vercel).
+// Unset (local dev) still falls through to the local uvicorn default.
+const API = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
 const CLASS_ORDER = ['Economy', 'Premium Economy', 'Business', 'First']
 

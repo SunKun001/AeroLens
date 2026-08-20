@@ -9,12 +9,31 @@ import joblib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-model = joblib.load(ROOT / "models" / "xgb_price_model.pkl")
-df = pd.read_csv(ROOT / "data" / "cleaned_flights_analysis.csv")
 
 FEATURES = ['Airline','Source','Destination','Total_Stops','Distance_km',
             'Travel_Class','Days_Before_Departure','Season','Weekday',
             'Aircraft_Type','Booking_Channel','Passenger_Count','Duration_mins']
+
+# Lazy, cached load: a serverless cold start shouldn't pay to unpickle the
+# model for a request (like /api/options) that only needs the dataframe.
+# Module-level caching means a warm invocation reuses both for free,
+# identical to the old eager-load behaviour once loaded.
+_model = None
+_df = None
+
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = joblib.load(ROOT / "models" / "xgb_price_model.pkl")
+    return _model
+
+
+def get_df():
+    global _df
+    if _df is None:
+        _df = pd.read_csv(ROOT / "data" / "cleaned_flights_analysis.csv")
+    return _df
 
 app = FastAPI(title="AeroLens API")
 
@@ -33,6 +52,7 @@ app.add_middleware(
 @app.get("/api/options")
 def options():
     """Dropdown values for the frontend."""
+    df = get_df()
     return {
         "sources": sorted(df['Source'].unique().tolist()),
         "destinations": sorted(df['Destination'].unique().tolist()),
@@ -43,6 +63,7 @@ def options():
 
 def _template(source, destination, travel_class):
     """Borrow a real flight so feature combinations stay plausible."""
+    df = get_df()
     pool = df[(df['Source'] == source) &
               (df['Destination'] == destination) &
               (df['Travel_Class'] == travel_class)]
@@ -60,6 +81,7 @@ class PredictRequest(BaseModel):
 
 @app.post("/api/predict")
 def predict(req: PredictRequest):
+    model = get_model()
     pool = _template(req.source, req.destination, req.travel_class)
     sample = pool.sample(min(50, len(pool)), random_state=42)
 
@@ -82,6 +104,7 @@ def predict(req: PredictRequest):
 @app.post("/api/forecast")
 def forecast(req: PredictRequest):
     """Price curve across every booking lead time, 0-120 days."""
+    model = get_model()
     pool = _template(req.source, req.destination, req.travel_class)
     sample = pool.sample(min(100, len(pool)), random_state=42)
 
@@ -120,6 +143,8 @@ class CompareRequest(BaseModel):
 @app.post("/api/compare")
 def compare(req: CompareRequest):
     """Forecast curves for every cabin class available on a route."""
+    model = get_model()
+    df = get_df()
     out = []
     for cls in ['Economy', 'Premium Economy', 'Business', 'First']:
         pool = df[(df['Source'] == req.source) &
